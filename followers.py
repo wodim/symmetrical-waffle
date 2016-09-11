@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+
 import tweepy
 
 from twitter import twitter
@@ -11,7 +13,9 @@ def follow_followers(screen_name=None):
             if (not user.following and
                 not user.follow_request_sent and
                 user.id != twitter.me.id and
-                user.followers_count > 100):
+                user.followers_count > 100 and
+                (hasattr(user, 'status') and
+                 user.status.created_at > datetime.now() - timedelta(days=3))):
                 try:
                     user.follow()
                 except tweepy.error.TweepError as e:
