@@ -1,12 +1,17 @@
 from datetime import datetime, timedelta
+from queue import Queue
+import threading
 
 import tweepy
 
 from twitter import twitter
 
 
-def follow_followers(screen_name=None):
+def follow_followers(screen_name=None, num_threads=50):
     screen_name = screen_name or twitter.me.screen_name
+
+    # download the list of users to follow
+    users = []
     for page in tweepy.Cursor(twitter.api.followers, screen_name=screen_name,
                               count=200).pages():
         for user in page:
@@ -16,6 +21,14 @@ def follow_followers(screen_name=None):
                 user.followers_count > 100 and
                 (hasattr(user, 'status') and
                  user.status.created_at > datetime.now() - timedelta(days=3))):
+                users.append(user)
+        print('{len} users downloaded...'.format(len=len(users)))
+    print('Finished: {len} users total'.format(len=len(users)))
+
+    def follow():
+        while True:
+            user = queue.get()
+            while True:
                 try:
                     user.follow()
                 except tweepy.error.TweepError as e:
@@ -27,6 +40,18 @@ def follow_followers(screen_name=None):
                     print('Following @{screen_name} ({id}): success!'
                           .format(screen_name=user.screen_name,
                                   id=user.id))
+                    break
+            queue.task_done()
+
+    queue = Queue()
+    for i in range(num_threads):
+        thread = threading.Thread(target=follow)
+        thread.daemon = True
+        thread.start()
+
+    for user in users:
+        queue.put(user)
+    queue.join()
 
 
 def unfollow_my_unfollowers():
