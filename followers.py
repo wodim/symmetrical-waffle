@@ -8,7 +8,7 @@ from twitter import twitter
 
 
 class Parallel(object):
-    def __init__(self, func, things, num_threads=50):
+    def __init__(self, func, things, num_threads):
         self.queue = Queue()
         for i in range(num_threads):
             thread = threading.Thread(target=func, args=(self.queue,))
@@ -22,7 +22,7 @@ class Parallel(object):
         self.queue.join()
 
 
-def follow_followers(screen_name=None, num_threads=50):
+def follow_followers(screen_name=None, **kwargs):
     screen_name = screen_name or twitter.me.screen_name
 
     # download the list of users to follow
@@ -47,10 +47,15 @@ def follow_followers(screen_name=None, num_threads=50):
                 try:
                     user.follow()
                 except tweepy.error.TweepError as e:
-                    print('Following @{screen_name} ({id}): error: {e}'
-                          .format(screen_name=user.screen_name,
-                                  id=user.id,
-                                  e=str(e)))
+                    if e.api_code == 161:
+                        print('Following @{screen_name} ({id}): throttled.'
+                              .format(screen_name=user.screen_name,
+                                      id=user.id))
+                    else:
+                        print('Following @{screen_name} ({id}): error: {e}'
+                              .format(screen_name=user.screen_name,
+                                      id=user.id,
+                                      e=str(e)))
                 else:
                     print('Following @{screen_name} ({id}): success!'
                           .format(screen_name=user.screen_name,
@@ -58,11 +63,11 @@ def follow_followers(screen_name=None, num_threads=50):
                     break
             queue.task_done()
 
-    parallel = Parallel(follow, users)
+    parallel = Parallel(follow, users, kwargs.get('num_threads', 50))
     parallel.start()
 
 
-def mass_unfollow(only_unfollowers=False):
+def mass_unfollow(only_unfollowers=False, **kwargs):
     users = []
     count = 100 if only_unfollowers else 200
     for page in tweepy.Cursor(twitter.api.friends, count=count).pages():
@@ -72,7 +77,7 @@ def mass_unfollow(only_unfollowers=False):
                 if not user.is_followed_by:
                     users.append(user)
         else:
-            users.extend([user.screen_name for user in page])
+            users.extend(page)
 
         print('{len} users downloaded...'.format(len=len(users)))
     print('Finished: {len} users total'.format(len=len(users)))
@@ -80,16 +85,20 @@ def mass_unfollow(only_unfollowers=False):
     def unfollow(queue):
         while True:
             user = queue.get()
-            print('Unfollowing @{screen_name} ({id})'
-                  .format(screen_name=user.screen_name,
-                          id=user.id))
             try:
                 twitter.api.destroy_friendship(user.id)
             except tweepy.error.TweepError as e:
-                print('Error unfollowing.')
+                print('Unfollowing @{screen_name} ({id}): error: {e}'
+                      .format(screen_name=user.screen_name,
+                              id=user.id,
+                              e=str(e)))
+            else:
+                print('Unfollowing @{screen_name} ({id}): success!'
+                      .format(screen_name=user.screen_name,
+                              id=user.id))
             queue.task_done()
 
-    parallel = Parallel(unfollow, users)
+    parallel = Parallel(unfollow, users, kwargs.get('num_threads', 50))
     parallel.start()
 
 
