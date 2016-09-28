@@ -1,10 +1,32 @@
 from datetime import datetime, timedelta
 from queue import Queue
+import random
 import threading
 
 import tweepy
 
 from twitter import twitter
+
+
+SOURCES_WHITELIST = ('Twitter for Android',
+                     'Twitter for iPad',
+                     'Twitter for iPhone',
+                     'Twitter for Mac',
+                     'Twitter for Windows',
+                     'Twitter for Windows Phone',
+                     'Twitter Web Client',
+                     'TweetDeck',
+                     'Tweetbot for iΟS',
+                     'Tweetbot for Mac',
+                     'Mobile Web',
+                     'Mobile Web (M2)',
+                     'Mobile Web (M5)')
+STATUS_LEFT = '{left:> 6d} left | '
+FOLLOW_THROTTLE = STATUS_LEFT + 'Following @{screen_name} ({id}): throttled.'
+FOLLOW_ERROR = STATUS_LEFT + 'Following @{screen_name} ({id}): error: {e}'
+FOLLOW_SUCCESS = STATUS_LEFT + 'Following @{screen_name} ({id}): success!'
+UNFOLLOW_ERROR = STATUS_LEFT + 'Unfollowing @{screen_name} ({id}): error: {e}'
+UNFOLLOW_SUCCESS = STATUS_LEFT + 'Unfollowing @{screen_name} ({id}): success!'
 
 
 class Parallel(object):
@@ -24,21 +46,32 @@ class Parallel(object):
 
 def follow_followers(screen_name=None, **kwargs):
     screen_name = screen_name or twitter.me.screen_name
+    min_followers = kwargs.get('min_followers', 50)
+    last_post_delta = kwargs.get('last_post_delta', 7)
 
     # download the list of users to follow
     users = []
     for page in tweepy.Cursor(twitter.api.followers, screen_name=screen_name,
                               count=200).pages():
         for user in page:
-            if (not user.following and
-                not user.follow_request_sent and
-                user.id != twitter.me.id and
-                user.followers_count > 50 and
-                (hasattr(user, 'status') and
-                 user.status.created_at > datetime.now() - timedelta(days=7))):
-                users.append(user)
+            if user.following or user.follow_request_sent:
+                continue
+            if user.id == twitter.me.id:
+                continue
+            if min_followers and user.followers_count < min_followers:
+                continue
+            if not hasattr(user, 'status'):
+                continue
+            if last_post_delta:
+                if (user.status.created_at <
+                        datetime.now() - timedelta(days=last_post_delta)):
+                    continue
+                if user.status.source not in SOURCES_WHITELIST:
+                    continue
+            users.append(user)
         print('{len} users downloaded...'.format(len=len(users)))
     print('Finished: {len} users total'.format(len=len(users)))
+    random.shuffle(users)
 
     def follow(queue):
         while True:
@@ -48,17 +81,20 @@ def follow_followers(screen_name=None, **kwargs):
                     user.follow()
                 except tweepy.error.TweepError as e:
                     if e.api_code == 161:
-                        print('Following @{screen_name} ({id}): throttled.'
-                              .format(screen_name=user.screen_name,
+                        print(FOLLOW_THROTTLE
+                              .format(left=queue.qsize(),
+                                      screen_name=user.screen_name,
                                       id=user.id))
                     else:
-                        print('Following @{screen_name} ({id}): error: {e}'
-                              .format(screen_name=user.screen_name,
+                        print(FOLLOW_ERROR
+                              .format(left=queue.qsize(),
+                                      screen_name=user.screen_name,
                                       id=user.id,
                                       e=str(e)))
                 else:
-                    print('Following @{screen_name} ({id}): success!'
-                          .format(screen_name=user.screen_name,
+                    print(FOLLOW_SUCCESS
+                          .format(left=queue.qsize(),
+                                  screen_name=user.screen_name,
                                   id=user.id))
                     break
             queue.task_done()
@@ -88,13 +124,15 @@ def mass_unfollow(only_unfollowers=False, **kwargs):
             try:
                 twitter.api.destroy_friendship(user.id)
             except tweepy.error.TweepError as e:
-                print('Unfollowing @{screen_name} ({id}): error: {e}'
-                      .format(screen_name=user.screen_name,
+                print(UNFOLLOW_ERROR
+                      .format(left=queue.qsize(),
+                              screen_name=user.screen_name,
                               id=user.id,
                               e=str(e)))
             else:
-                print('Unfollowing @{screen_name} ({id}): success!'
-                      .format(screen_name=user.screen_name,
+                print(UNFOLLOW_SUCCESS
+                      .format(left=queue.qsize(),
+                              screen_name=user.screen_name,
                               id=user.id))
             queue.task_done()
 
