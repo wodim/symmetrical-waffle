@@ -22,7 +22,7 @@ SOURCES_WHITELIST = ('Twitter for Android',
                      'Mobile Web (M2)',
                      'Mobile Web (M5)')
 STATUS_INFO = ('{tpc:>6.1%} done. '
-               '{users:>5} users downloaded ({fpc:.1%} filtered)')
+               '{users:>5} users downloaded ({fpc:.1%} selected)')
 STATUS_LEFT = '{left:> 6d} left | '
 FOLLOWING_PREFIX = 'Following @{screen_name} ({id}): '
 UNFOLLOWING_PREFIX = 'Unfollowing @{screen_name} ({id}): '
@@ -65,7 +65,8 @@ def mass_follow(screen_name=None, min_followers=50, last_post_delta=7,
             followed. useful to ignore dormant/spammy accounts.
         not_my_followers: don't follow users who already follow you.
         lang: only follow users who use the twitter app/website in a certain
-            language, such as "en", "de", etc
+            language, such as "en", "de", etc. can be a str or a list of
+            strs
         num_threads: number of threads that will be launched to follow users
             in parallel. doesn't affect the retrieval of the list.
         type: list of users that we'll download from screen_name: can be either
@@ -99,15 +100,22 @@ def mass_follow(screen_name=None, min_followers=50, last_post_delta=7,
                 continue
             if check_eligibility and not _is_eligible(user):
                 continue
-            if lang and lang != user.lang:
-                continue
+            if lang:
+                if isinstance(lang, (list, set, tuple)):
+                    if user.lang not in lang:
+                        continue
+                elif isinstance(lang, str):
+                    if user.lang != lang:
+                        continue
+                else:
+                    raise ValueError('lang must be either a str or a list')
             if not_my_followers and user.followed_by:
                 continue
             if last_post_delta:
                 if not hasattr(user, 'status'):
                     continue
-                if (user.status.created_at <
-                        datetime.now() - timedelta(days=last_post_delta)):
+                delta_min = datetime.now() - timedelta(days=last_post_delta)
+                if user.status.created_at < delta_min:
                     continue
                 if user.status.source not in SOURCES_WHITELIST:
                     continue
@@ -228,8 +236,11 @@ def mass_unfollow(only_followers=False, only_unfollowers=False,
         raise ValueError('choose either only_followers or only_unfollowers!')
 
     users = []
+    all_users = []
+    total = twitter.me.friends_count
     count = 100 if only_followers or only_unfollowers else 200
     for page in tweepy.Cursor(twitter.api.friends, count=count).pages():
+        all_users.extend(page)
         if only_followers or only_unfollowers:
             user_ids = [user.id for user in page]
             for user in twitter.api._lookup_friendships(user_ids):
@@ -242,7 +253,9 @@ def mass_unfollow(only_followers=False, only_unfollowers=False,
         else:
             users.extend(page)
 
-        print('{len} users downloaded...'.format(len=len(users)))
+        print(STATUS_INFO.format(users=len(users),
+                                 tpc=len(all_users) / total,
+                                 fpc=len(users) / len(all_users)))
     print('Finished: {len} users total'.format(len=len(users)))
 
     def unfollow(queue):
@@ -293,16 +306,17 @@ def print_list(screen_name=None, type='friends', format='simple'):
         raise ValueError
 
     if format == 'csv':
-        print('user,friends,followers')
+        print('user,friends,followers,lang')
     for page in tweepy.Cursor(func, screen_name=screen_name,
                               count=200).pages():
         for user in page:
             if format == 'simple':
                 print(user.screen_name)
             elif format == 'csv':
-                print('%s,%d,%d' % (user.screen_name,
-                                    user.friends_count,
-                                    user.followers_count))
+                print('%s,%d,%d,%s' % (user.screen_name,
+                                       user.friends_count,
+                                       user.followers_count,
+                                       user.lang))
 
 
 def print_tweets(screen_name=None, include_retweets=False):
