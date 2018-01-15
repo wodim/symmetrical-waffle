@@ -77,16 +77,16 @@ def mass_follow(screen_name=None, min_followers=50, last_post_delta=7,
     if not screen_name:
         screen_name = twitter.me.screen_name
 
-    if type == 'friends':
+    if type in ('friends', 'following'):
         func = twitter.api.friends
         total = twitter.api.get_user(screen_name).friends_count
     elif type == 'followers':
         func = twitter.api.followers
         total = twitter.api.get_user(screen_name).followers_count
     else:
-        raise ValueError
+        raise ValueError('"type" must be either "friends" or "followers"')
     # download the list of users to follow
-    users = []
+    filtered_users = []
     all_users = []
     for page in tweepy.Cursor(func, screen_name=screen_name,
                               count=200).pages():
@@ -119,12 +119,12 @@ def mass_follow(screen_name=None, min_followers=50, last_post_delta=7,
                     continue
                 if user.status.source not in SOURCES_WHITELIST:
                     continue
-            users.append(user)
-        print(STATUS_INFO.format(users=len(users),
+            filtered_users.append(user)
+        print(STATUS_INFO.format(users=len(filtered_users),
                                  tpc=len(all_users) / total,
-                                 fpc=len(users) / len(all_users)))
-    print('Finished: {len} users total'.format(len=len(users)))
-    random.shuffle(users)
+                                 fpc=len(filtered_users) / len(all_users)))
+    print('Finished: {len} users total'.format(len=len(filtered_users)))
+    random.shuffle(filtered_users)
 
     def follow(queue):
         while True:
@@ -152,7 +152,7 @@ def mass_follow(screen_name=None, min_followers=50, last_post_delta=7,
                     break
             queue.task_done()
 
-    parallel = Parallel(follow, users, num_threads)
+    parallel = Parallel(follow, filtered_users, num_threads)
     parallel.start()
 
 
