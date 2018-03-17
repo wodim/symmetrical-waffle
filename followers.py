@@ -52,7 +52,7 @@ class Parallel(object):
 
 def mass_follow(screen_name=None, min_followers=50, last_post_delta=7,
                 not_my_followers=True, lang=None, num_threads=50,
-                type='followers', check_eligibility=True):
+                type='followers', check_eligibility=True, randomize=True):
     """Massively follow a list of users taken from another account.
 
     Args:
@@ -73,6 +73,7 @@ def mass_follow(screen_name=None, min_followers=50, last_post_delta=7,
             his 'followers' or his 'friends' (following).
         check_eligibility: check the eligibility of the user using
             is_eligible() below. that function filters obvious spambots.
+        randomize: shuffle the list of users before they are followed.
     """
     if not screen_name:
         screen_name = twitter.me.screen_name
@@ -124,7 +125,8 @@ def mass_follow(screen_name=None, min_followers=50, last_post_delta=7,
                                  tpc=len(all_users) / total,
                                  fpc=len(filtered_users) / len(all_users)))
     print('Finished: {len} users total'.format(len=len(filtered_users)))
-    random.shuffle(filtered_users)
+    if randomize:
+        random.shuffle(filtered_users)
 
     def follow(queue):
         while True:
