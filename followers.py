@@ -52,7 +52,8 @@ class Parallel(object):
 
 def mass_follow(screen_name=None, min_followers=50, last_post_delta=7,
                 not_my_followers=True, lang=None, num_threads=50,
-                type='followers', check_eligibility=True, randomize=True):
+                type='followers', check_eligibility=True, randomize=True,
+                limit=None, pretend=True):
     """Massively follow a list of users taken from another account.
 
     Args:
@@ -74,6 +75,10 @@ def mass_follow(screen_name=None, min_followers=50, last_post_delta=7,
         check_eligibility: check the eligibility of the user using
             is_eligible() below. that function filters obvious spambots.
         randomize: shuffle the list of users before they are followed.
+        limit: max number of accounts that will be retrieved before the
+            following process begins.
+        pretend: don't actually do it, just print the stats when I'm done
+            retrieving the list of users and quit.
     """
     if not screen_name:
         screen_name = twitter.me.screen_name
@@ -124,9 +129,14 @@ def mass_follow(screen_name=None, min_followers=50, last_post_delta=7,
         print(STATUS_INFO.format(users=len(filtered_users),
                                  tpc=len(all_users) / total,
                                  fpc=len(filtered_users) / len(all_users)))
+        if limit and len(filtered_users) > limit:
+            print('Limit reached!')
+            break
     print('Finished: {len} users total'.format(len=len(filtered_users)))
     if randomize:
         random.shuffle(filtered_users)
+    if pretend:
+        return
 
     def follow(queue):
         while True:
@@ -224,7 +234,7 @@ def follow_from_file(filename, ids=False, num_threads=50):
 
 
 def mass_unfollow(only_followers=False, only_unfollowers=False,
-                  num_threads=50):
+                  num_threads=50, randomize=True, limit=None, pretend=False):
     """Massively unfollow users.
 
     Args:
@@ -232,12 +242,17 @@ def mass_unfollow(only_followers=False, only_unfollowers=False,
         only_unfollowers: only unfollow users who don't follow you.
         num_threads: number of threads that will be launched to unfollow users
             in parallel.
+        randomize: shuffle the list of users before they are unfollowed.
+        limit: max number of accounts that will be retrieved before the
+            following process begins.
+        pretend: don't actually do it, just print the stats when I'm done
+            retrieving the list of users and quit.
 
     """
     if only_followers and only_unfollowers:
         raise ValueError('choose either only_followers or only_unfollowers!')
 
-    users = []
+    filtered_users = []
     all_users = []
     total = twitter.me.friends_count
     count = 100 if only_followers or only_unfollowers else 200
@@ -248,17 +263,24 @@ def mass_unfollow(only_followers=False, only_unfollowers=False,
             for user in twitter.api._lookup_friendships(user_ids):
                 if only_followers:
                     if user.is_followed_by:
-                        users.append(user)
+                        filtered_users.append(user)
                 if only_unfollowers:
                     if not user.is_followed_by:
-                        users.append(user)
+                        filtered_users.append(user)
         else:
-            users.extend(page)
+            filtered_users.extend(page)
 
-        print(STATUS_INFO.format(users=len(users),
+        print(STATUS_INFO.format(users=len(filtered_users),
                                  tpc=len(all_users) / total,
-                                 fpc=len(users) / len(all_users)))
-    print('Finished: {len} users total'.format(len=len(users)))
+                                 fpc=len(filtered_users) / len(all_users)))
+        if limit and len(filtered_users) > limit:
+            print('Limit reached!')
+            break
+    print('Finished: {len} users total'.format(len=len(filtered_users)))
+    if randomize:
+        random.shuffle(filtered_users)
+    if pretend:
+        return
 
     def unfollow(queue):
         while True:
@@ -278,7 +300,7 @@ def mass_unfollow(only_followers=False, only_unfollowers=False,
                               id=user.id))
             queue.task_done()
 
-    parallel = Parallel(unfollow, users, num_threads)
+    parallel = Parallel(unfollow, filtered_users, num_threads)
     parallel.start()
 
 
