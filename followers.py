@@ -53,7 +53,7 @@ class Parallel(object):
 def mass_follow(screen_name=None, min_followers=50, last_post_delta=7,
                 not_my_followers=True, lang=None, num_threads=50,
                 type='followers', check_eligibility=True, randomize=True,
-                limit=None, pretend=True):
+                limit=None, pretend=False):
     """Massively follow a list of users taken from another account.
 
     Args:
@@ -108,10 +108,10 @@ def mass_follow(screen_name=None, min_followers=50, last_post_delta=7,
                 continue
             if lang:
                 if isinstance(lang, (list, set, tuple)):
-                    if user.lang not in lang:
+                    if user.lang.lower() not in lang:
                         continue
                 elif isinstance(lang, str):
-                    if user.lang != lang:
+                    if user.lang.lower() != lang:
                         continue
                 else:
                     raise ValueError('lang must be either a str or a list')
@@ -233,13 +233,17 @@ def follow_from_file(filename, ids=False, num_threads=50):
     parallel.start()
 
 
-def mass_unfollow(only_followers=False, only_unfollowers=False,
+def mass_unfollow(followers=False, unfollowers=False,
+                  max_followers=50, last_post_delta=7, lang=None,
                   num_threads=50, randomize=True, limit=None, pretend=False):
-    """Massively unfollow users.
+    """Massively unfollow users according to some criteria. The criteria is
+        ORed together!
+
+    The behaviour of this function is a bit different if either followers or
+        unfollowers is specified because we need to use lookup_friendships in
+        that case.
 
     Args:
-        only_followers: only unfollow users who already follow you.
-        only_unfollowers: only unfollow users who don't follow you.
         num_threads: number of threads that will be launched to unfollow users
             in parallel.
         randomize: shuffle the list of users before they are unfollowed.
@@ -248,28 +252,59 @@ def mass_unfollow(only_followers=False, only_unfollowers=False,
         pretend: don't actually do it, just print the stats when I'm done
             retrieving the list of users and quit.
 
-    """
-    if only_followers and only_unfollowers:
-        raise ValueError('choose either only_followers or only_unfollowers!')
+        followers: unfollow users who already follow you.
+        unfollowers: unfollow users who don't follow you.
+        max_followers: only users with fewer than this number of followers will
+            be unfollowed.
+        last_post_delta: the user has to have posted something in the last X
+            days using one of the clients hardcoded in SOURCES_WHITELIST to be
+            followed. useful to ignore dormant/spammy accounts.
+        lang: only unfollow users who don't use the twitter app/website in a
+            certain language, such as "en", "de", etc. can be a str or a list
+            of strs
 
+    """
     filtered_users = []
     all_users = []
     total = twitter.me.friends_count
-    count = 100 if only_followers or only_unfollowers else 200
+    count = 100 if followers or unfollowers else 200
     for page in tweepy.Cursor(twitter.api.friends, count=count).pages():
         all_users.extend(page)
-        if only_followers or only_unfollowers:
+        if followers or unfollowers:
             user_ids = [user.id for user in page]
-            for user in twitter.api._lookup_friendships(user_ids):
-                if only_followers:
-                    if user.is_followed_by:
-                        filtered_users.append(user)
-                if only_unfollowers:
-                    if not user.is_followed_by:
-                        filtered_users.append(user)
-        else:
-            filtered_users.extend(page)
+            rels = {x.id: x for x in twitter.api._lookup_friendships(user_ids)}
 
+        for user in page:
+            if user.id == twitter.me.id:
+                continue
+            if followers:
+                if rels[user.id].is_followed_by:
+                    filtered_users.append(user)
+                    continue
+            if unfollowers:
+                if not rels[user.id].is_followed_by:
+                    filtered_users.append(user)
+                    continue
+            if lang:
+                if isinstance(lang, (list, set, tuple)):
+                    if user.lang.lower() not in lang:
+                        filtered_users.append(user)
+                        continue
+                elif isinstance(lang, str):
+                    if user.lang.lower() != lang:
+                        filtered_users.append(user)
+                        continue
+                else:
+                    raise ValueError('lang must be either a str or a list')
+            if last_post_delta and hasattr(user, 'status'):
+                delta_min = datetime.now() - timedelta(days=last_post_delta)
+                if (user.status.created_at < delta_min and
+                        user.status.source not in SOURCES_WHITELIST):
+                    filtered_users.append(user)
+                    continue
+            if max_followers and user.followers_count < max_followers:
+                filtered_users.append(user)
+                continue
         print(STATUS_INFO.format(users=len(filtered_users),
                                  tpc=len(all_users) / total,
                                  fpc=len(filtered_users) / len(all_users)))
